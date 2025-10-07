@@ -4,8 +4,8 @@
 
 import argparse
 from typing import Iterable, List, Tuple
+import os
 import numpy as np
-import matplotlib.pyplot as plt
 
 
 def simulate_gbm_paths(
@@ -94,11 +94,29 @@ def compute_exposure_metrics(
     return expected_exposure, pfe, epe
 
 
-def plot_exposure(expected_exposure: np.ndarray, pfe: np.ndarray, title_suffix: str = "") -> None:
-    """Plot the EE and PFE profiles over time."""
+def compute_running_discounted_epe(
+    expected_exposure: np.ndarray,
+    risk_free_rate: float,
+    time_horizon_years: float,
+) -> np.ndarray:
+    """Compute running discounted EPE curve over time for visualization."""
+    steps = expected_exposure.shape[0]
+    times = np.linspace(0.0, time_horizon_years, steps)
+    discount_factors = np.exp(-risk_free_rate * times)
+    cumulative = np.cumsum(expected_exposure * discount_factors)
+    # avoid divide by zero for first element; start from 1
+    denom = np.arange(1, steps + 1)
+    return cumulative / denom
+
+
+def plot_exposure(expected_exposure: np.ndarray, pfe: np.ndarray, title_suffix: str = "", running_epe: np.ndarray | None = None) -> None:
+    """Plot the EE and PFE profiles over time, with optional running discounted EPE."""
+    import matplotlib.pyplot as plt  # local import after backend is set
     plt.figure(figsize=(10, 5))
     plt.plot(expected_exposure, label="Expected Exposure (EE)")
     plt.plot(pfe, "--", label="Potential Future Exposure (PFE)")
+    if running_epe is not None:
+        plt.plot(running_epe, ":", label="Running discounted EPE")
     plt.title(f"Counterparty Credit Risk Exposure Simulation{title_suffix}")
     plt.xlabel("Time Steps (Days)")
     plt.ylabel("Exposure")
@@ -116,6 +134,7 @@ def run_sensitivity(
 
     For each value, compute EPE and terminal-time PFE and plot summary vs the swept value.
     """
+    import matplotlib.pyplot as plt  # local import after backend is set
     x_values: List[float] = []
     epe_values: List[float] = []
     pfe_terminal_values: List[float] = []
@@ -185,8 +204,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--r", type=float, default=0.03, help="Risk-free rate (annual)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--pfe", type=float, default=95.0, help="PFE percentile (e.g., 95)")
+    parser.add_argument("--confidence", type=float, default=None, help="Confidence level (e.g., 0.99) to map to PFE percentile")
     parser.add_argument("--no-show", action="store_true", help="Do not display the plot window")
     parser.add_argument("--save-fig", type=str, default="", help="Path to save plot image (e.g., exposure.png)")
+    parser.add_argument("--save_plot", action="store_true", help="Alias: save plot to exposure_plot.png")
+    parser.add_argument("--plot-epe", action="store_true", help="Also plot running discounted EPE curve")
 
     # Sensitivity analysis options
     parser.add_argument("--sensitivity", action="store_true", help="Run sensitivity analysis instead of a single run")
@@ -207,8 +229,33 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def select_backend(no_show: bool, saving: bool) -> None:
+    """Select a non-GUI backend when running headless or saving figures.
+
+    This avoids GUI requirements and common PIL backend issues on some systems.
+    """
+    if no_show or saving or os.environ.get("CI"):
+        os.environ["MPLBACKEND"] = "Agg"
+
+
 def main() -> None:
     args = parse_args()
+
+    # Map confidence (0-1) to percentile if provided
+    if args.confidence is not None:
+        if not (0.0 < args.confidence < 1.0):
+            raise ValueError("--confidence must be in (0,1)")
+        args.pfe = 100.0 * float(args.confidence)
+
+    # Map --save_plot to a default save path if not provided
+    if args.save_plot and not args.save_fig:
+        args.save_fig = "exposure_plot.png"
+    if args.save_plot:
+        args.no_show = True
+
+    # Choose backend before importing pyplot
+    select_backend(no_show=args.no_show, saving=bool(args.save_fig or args.save_fig_sensitivity))
+    import matplotlib.pyplot as plt  # after backend selection
 
     if args.sensitivity:
         values = [float(x.strip()) for x in args.sweep_values.split(",") if x.strip()]
@@ -241,8 +288,10 @@ def main() -> None:
         pfe_percentile=args.pfe,
     )
 
+    running_epe = compute_running_discounted_epe(expected_exposure, risk_free_rate=args.r, time_horizon_years=args.T) if args.plot_epe else None
+
     title_suffix = f" (PFE {args.pfe:.0f}th)"
-    plot_exposure(expected_exposure, pfe, title_suffix=title_suffix)
+    plot_exposure(expected_exposure, pfe, title_suffix=title_suffix, running_epe=running_epe)
 
     if args.save_fig:
         plt.savefig(args.save_fig, dpi=200)
@@ -253,6 +302,8 @@ def main() -> None:
         plt.close()
 
     print(f"Expected Positive Exposure (EPE): {epe:.2f}")
+    if len(pfe) > 0:
+        print(f"PFE at maturity ({args.pfe:.0f}th): {pfe[-1]:.2f}")
     print("Simulation Complete ✅")
 
 
