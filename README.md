@@ -1,5 +1,7 @@
 # Monte Carlo Simulation for Counterparty Credit Risk (CCR)
 
+[![CI](https://github.com/tchtinku/QuantFinance-CCR-Exposure-Simulation/actions/workflows/ci.yml/badge.svg)](https://github.com/tchtinku/QuantFinance-CCR-Exposure-Simulation/actions/workflows/ci.yml)
+
 This Python project simulates Expected Exposure (EE), Potential Future Exposure (PFE), and Expected Positive Exposure (EPE) for a simple derivative (European call option) using Geometric Brownian Motion (GBM) and Monte Carlo methods.
 
 ## Why this project
@@ -33,6 +35,11 @@ You should see a plot of Expected Exposure (EE) and Potential Future Exposure (P
 Expected Positive Exposure (EPE): 8.47
 Simulation Complete ✅
 ```
+
+## CI and artifacts
+- On every push/PR, CI runs the simulation headlessly and uploads `exposure.png` as a workflow artifact.
+- Download it from the Actions run → Artifacts.
+- To create a release with the plot attached, tag a version like `v1.0.0` and push the tag; the Release workflow will publish `exposure.png`.
 
 ## CLI usage
 You can override parameters and control plotting via flags:
